@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>E-Absensi GPS | Presensi Karyawan</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
+      min-height: 100vh;
+    }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+    }
+    .pulse-ring {
+      animation: pulseRing 2s infinite;
+    }
+    @keyframes pulseRing {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+      70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+  </style>
+</head>
+<body class="text-slate-800 pb-10">
+
+  <script>
+    // ==================== KONFIGURASI UTAMA ====================
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx7dwl0IfXn_GinraXklb-CukPb86W6PNDeF1g7SQ-K0GyJNcQypHfBtVGwsk7Ocol-Hw/exec";
+
+    // Titik Koordinat Kantor / Lokasi Target (Contoh: Monas Jakarta)
+    const OFFICE_LAT = -6.22172216624946;
+    const OFFICE_LNG = 107.04498079340226;
+
+    // Batas maksimal radius absensi dalam meter
+    const MAX_RADIUS_METER = 100;
+
+    // Ubah ke true jika ingin MENOLAK absensi saat jarak melebihi MAX_RADIUS_METER
+    // Jika false, absensi tetap tercatat namun berstatus "Di Luar Radius"
+    const STRICT_RADIUS = false;
+    // ===========================================================
+  </script>
+
+  <!-- Top Navbar -->
+  <nav class="bg-slate-900 text-white shadow-lg sticky top-0 z-30">
+    <div class="max-w-3xl mx-auto px-4 py-3.5 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-indigo-500 flex items-center justify-center shadow-md">
+          <i class="fa-solid fa-location-crosshairs text-white text-lg"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-base leading-tight tracking-tight">E-Absensi GPS</h1>
+          <p class="text-[11px] text-slate-400">Presensi Real-Time Berbasis Lokasi</p>
+        </div>
+      </div>
+
+      <button onclick="openAdminModal()" id="btnAdminNav"
+        class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition active:scale-95">
+        <i class="fa-solid fa-lock text-amber-400"></i>
+        <span>Report Admin</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ==================== VIEW 1: HALAMAN ABSENSI KARYAWAN ==================== -->
+  <main id="employeeView" class="max-w-md mx-auto px-4 pt-5 space-y-4">
+
+    <!-- Digital Clock Card -->
+    <div class="rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-6 shadow-xl relative overflow-hidden">
+      <div class="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-indigo-500/20 blur-2xl"></div>
+      <div class="absolute -left-8 -bottom-8 w-36 h-36 rounded-full bg-emerald-500/10 blur-2xl"></div>
+
+      <div class="relative z-10 text-center">
+        <p id="liveDate" class="text-xs font-medium text-indigo-300 uppercase tracking-wider mb-1">Memuat tanggal...</p>
+        <div id="liveClock" class="text-4xl sm:text-5xl font-extrabold tracking-tight font-mono my-1">00:00:00</div>
+        <span class="inline-block mt-1 px-3 py-0.5 rounded-full bg-white/10 text-[11px] text-slate-300">
+          Waktu Indonesia Barat (WIB)
+        </span>
+      </div>
+    </div>
+
+    <!-- GPS Status & Distance Card -->
+    <div class="glass-card rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span id="gpsDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 pulse-ring"></span>
+          <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Status Lokasi GPS</span>
+        </div>
+        <button onclick="refreshGPS()" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+          <i class="fa-solid fa-rotate-right" id="gpsRefreshIcon"></i> Refresh GPS
+        </button>
+      </div>
+
+      <div class="bg-slate-50 rounded-xl p-3 border border-slate-200/80 space-y-2">
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-500">Koordinat Anda:</span>
+          <span id="userCoordsText" class="font-mono font-semibold text-slate-700">Mendeteksi...</span>
+        </div>
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-500">Jarak ke Titik Pusat:</span>
+          <span id="distanceText" class="font-bold text-sm text-slate-800">-- meter</span>
+        </div>
+        <div class="flex justify-between items-center text-xs pt-1 border-t border-slate-200/70">
+          <span class="text-slate-500">Status Radius (Maks. <span id="maxRadiusLabel">100</span>m):</span>
+          <span id="radiusBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-200 text-slate-600">
+            Menunggu GPS...
+          </span>
+        </div>
+      </div>
+
+      <div class="mt-2 text-right">
+        <a id="mapsPreviewLink" href="#" target="_blank" class="hidden text-[11px] text-indigo-600 hover:underline font-medium">
+          <i class="fa-solid fa-map-pin mr-1"></i>Lihat posisi saya di Google Maps
+        </a>
+      </div>
+    </div>
+
+    <!-- Form Data Karyawan & Tombol Absen -->
+    <div class="glass-card rounded-3xl p-5 shadow-md space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1">NIK / ID Karyawan <span class="text-rose-500">*</span></label>
+        <div class="relative">
+          <i class="fa-solid fa-id-card absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="inputNik" placeholder="Contoh: KSP-0012"
+            class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm font-medium transition" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1">Nama Lengkap <span class="text-rose-500">*</span></label>
+        <div class="relative">
+          <i class="fa-solid fa-user absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="inputNama" placeholder="Masukkan nama lengkap Anda"
+            class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm font-medium transition" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1">Cabang / Divisi</label>
+        <div class="relative">
+          <i class="fa-solid fa-building absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="inputCabang" placeholder="Contoh: Kantor Pusat / Cabang Lampung"
+            class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm font-medium transition" />
+        </div>
+      </div>
+
+      <!-- Tombol Absen Masuk & Keluar -->
+      <div class="grid grid-cols-2 gap-3 pt-2">
+        <button onclick="submitAbsen('MASUK')" id="btnMasuk"
+          class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white p-4 shadow-lg shadow-emerald-500/25 transition active:scale-95 flex flex-col items-center justify-center gap-1.5">
+          <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-lg">
+            <i class="fa-solid fa-right-to-bracket"></i>
+          </div>
+          <span class="font-extrabold text-sm tracking-wide">ABSEN MASUK</span>
+          <span id="lastMasukBadge" class="text-[10px] text-emerald-100 font-medium">Belum absen</span>
+        </button>
+
+        <button onclick="submitAbsen('KELUAR')" id="btnKeluar"
+          class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white p-4 shadow-lg shadow-rose-500/25 transition active:scale-95 flex flex-col items-center justify-center gap-1.5">
+          <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-lg">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </div>
+          <span class="font-extrabold text-sm tracking-wide">ABSEN KELUAR</span>
+          <span id="lastKeluarBadge" class="text-[10px] text-rose-100 font-medium">Belum absen</span>
+        </button>
+      </div>
+    </div>
+
+    <p class="text-center text-[11px] text-slate-400 pt-2">
+      powered by <span class="font-semibold text-slate-500">Asy-Syam Sakti</span>
+    </p>
+  </main>
+
+  <!-- ==================== VIEW 2: DASHBOARD REPORT ADMIN ==================== -->
+  <section id="adminView" class="hidden max-w-5xl mx-auto px-4 pt-6 space-y-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+      <div>
+        <h2 class="text-lg font-extrabold text-slate-800">Laporan Rekap Absensi</h2>
+        <p class="text-xs text-slate-500">Data tersinkronisasi langsung dengan Google Spreadsheet</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="exportToCSV()" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm">
+          <i class="fa-solid fa-file-excel"></i> Export CSV
+        </button>
+        <button onclick="logoutAdmin()" class="px-3.5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1.5">
+          <i class="fa-solid fa-arrow-left"></i> Kembali
+        </button>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 font-medium">Total Record</p>
+        <p id="statTotal" class="text-2xl font-extrabold text-slate-800 mt-1">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 font-medium">Hadir Hari Ini</p>
+        <p id="statToday" class="text-2xl font-extrabold text-indigo-600 mt-1">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 font-medium">Dalam Radius</p>
+        <p id="statInRadius" class="text-2xl font-extrabold text-emerald-600 mt-1">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <p class="text-xs text-slate-500 font-medium">Luar Radius</p>
+        <p id="statOutRadius" class="text-2xl font-extrabold text-rose-600 mt-1">0</p>
+      </div>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div>
+        <label class="block text-[11px] font-bold text-slate-500 mb-1">Filter Tanggal</label>
+        <input type="date" id="filterDate" onchange="renderReportTable()"
+          class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium outline-none focus:border-indigo-500" />
+      </div>
+      <div>
+        <label class="block text-[11px] font-bold text-slate-500 mb-1">Cari Nama / NIK / Cabang</label>
+        <input type="text" id="filterSearch" onkeyup="renderReportTable()" placeholder="Ketik kata kunci..."
+          class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium outline-none focus:border-indigo-500" />
+      </div>
+      <div class="flex items-end">
+        <button onclick="resetFilters()" class="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold">
+          Reset Filter
+        </button>
+      </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="bg-slate-900 text-white">
+              <th class="p-3 font-semibold">Tanggal</th>
+              <th class="p-3 font-semibold">NIK</th>
+              <th class="p-3 font-semibold">Nama Karyawan</th>
+              <th class="p-3 font-semibold">Cabang</th>
+              <th class="p-3 font-semibold">Jam Masuk</th>
+              <th class="p-3 font-semibold">Jarak Masuk</th>
+              <th class="p-3 font-semibold">Jam Keluar</th>
+              <th class="p-3 font-semibold">Jarak Keluar</th>
+            </tr>
+          </thead>
+          <tbody id="reportTableBody" class="divide-y divide-slate-200">
+            <tr>
+              <td colspan="8" class="p-6 text-center text-slate-400">Belum ada data</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    let currentLat = null;
+    let currentLng = null;
+    let currentDistance = null;
+    let allReportData = [];
+    let filteredReportData = [];
+
+    // 1. Inisialisasi Halaman
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("maxRadiusLabel").textContent = MAX_RADIUS_METER;
+      startClock();
+      loadSavedProfile();
+      startGPSTracking();
+    });
+
+    // 2. Jam Digital Real-Time
+    function startClock() {
+      const update = () => {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString("id-ID", { hour12: false });
+        const dateStr = now.toLocaleDateString("id-ID", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        });
+        document.getElementById("liveClock").textContent = timeStr;
+        document.getElementById("liveDate").textContent = dateStr;
+      };
+      update();
+      setInterval(update, 1000);
+    }
+
+    // 3. Simpan & Muat Data Karyawan di HP (LocalStorage)
+    function loadSavedProfile() {
+      const savedNik = localStorage.getItem("absen_nik");
+      const savedNama = localStorage.getItem("absen_nama");
+      const savedCabang = localStorage.getItem("absen_cabang");
+
+      if (savedNik) document.getElementById("inputNik").value = savedNik;
+      if (savedNama) document.getElementById("inputNama").value = savedNama;
+      if (savedCabang) document.getElementById("inputCabang").value = savedCabang;
+
+      // Cek status absen hari ini di browser
+      const todayKey = new Date().toISOString().split("T")[0];
+      const logToday = JSON.parse(localStorage.getItem("absen_log_" + todayKey) || "{}");
+      if (logToday.masuk) {
+        document.getElementById("lastMasukBadge").textContent = "Masuk: " + logToday.masuk;
+      }
+      if (logToday.keluar) {
+        document.getElementById("lastKeluarBadge").textContent = "Keluar: " + logToday.keluar;
+      }
+    }
+
+    // 4. Pelacakan GPS & Perhitungan Jarak (Rumus Haversine)
+    function startGPSTracking() {
+      if (!navigator.geolocation) {
+        Swal.fire("GPS Tidak Didukung", "Browser HP Anda tidak mendukung fitur lokasi GPS.", "error");
+        return;
+      }
+
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          currentLat = pos.coords.latitude;
+          currentLng = pos.coords.longitude;
+          currentDistance = Math.round(calculateHaversine(OFFICE_LAT, OFFICE_LNG, currentLat, currentLng));
+
+          updateGPSUI();
+        },
+        (err) => {
+          document.getElementById("gpsDot").className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+          document.getElementById("userCoordsText").textContent = "Akses GPS Ditolak / Mati";
+          document.getElementById("radiusBadge").className = "px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700";
+          document.getElementById("radiusBadge").textContent = "Aktifkan GPS HP!";
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    }
+
+    function refreshGPS() {
+      const icon = document.getElementById("gpsRefreshIcon");
+      icon.classList.add("fa-spin");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          currentLat = pos.coords.latitude;
+          currentLng = pos.coords.longitude;
+          currentDistance = Math.round(calculateHaversine(OFFICE_LAT, OFFICE_LNG, currentLat, currentLng));
+          updateGPSUI();
+          setTimeout(() => icon.classList.remove("fa-spin"), 500);
+        },
+        () => {
+          icon.classList.remove("fa-spin");
+          Swal.fire("Gagal Memuat GPS", "Pastikan izin lokasi (GPS) di browser HP sudah diaktifkan.", "warning");
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+
+    function updateGPSUI() {
+      document.getElementById("gpsDot").className = "w-2.5 h-2.5 rounded-full bg-emerald-500 pulse-ring";
+      document.getElementById("userCoordsText").textContent = `${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}`;
+      document.getElementById("distanceText").textContent = `${currentDistance.toLocaleString("id-ID")} meter`;
+
+      const mapLink = document.getElementById("mapsPreviewLink");
+      mapLink.href = `https://www.google.com/maps?q=${currentLat},${currentLng}`;
+      mapLink.classList.remove("hidden");
+
+      const badge = document.getElementById("radiusBadge");
+      if (currentDistance <= MAX_RADIUS_METER) {
+        badge.className = "px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700";
+        badge.textContent = "Dalam Radius Kantor";
+      } else {
+        badge.className = "px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700";
+        badge.textContent = "Di Luar Radius Kantor";
+      }
+    }
+
+    // Rumus Haversine menghitung jarak dua titik koordinat dalam meter
+    function calculateHaversine(lat1, lon1, lat2, lon2) {
+      const R = 6371e3; // Radius bumi dalam meter
+      const toRad = (deg) => (deg * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    // 5. Kirim Data Absensi ke Google Spreadsheet
+    async function submitAbsen(tipe) {
+      const nik = document.getElementById("inputNik").value.trim();
+      const nama = document.getElementById("inputNama").value.trim();
+      const cabang = document.getElementById("inputCabang").value.trim();
+
+      if (!WEB_APP_URL || WEB_APP_URL.includes("PASTE_URL")) {
+        Swal.fire("Konfigurasi Belum Lengkap", "URL Google Apps Script belum dipasang pada kode index.html.", "error");
+        return;
+      }
+
+      if (!nik || !nama) {
+        Swal.fire("Data Belum Lengkap", "Silakan isi NIK / ID Karyawan dan Nama Lengkap terlebih dahulu.", "warning");
+        return;
+      }
+
+      if (currentLat === null || currentLng === null) {
+        Swal.fire("Lokasi Belum Terdeteksi", "Tunggu hingga titik GPS Anda terkunci sebelum menekan tombol absen.", "warning");
+        return;
+      }
+
+      const isInside = currentDistance <= MAX_RADIUS_METER;
+      if (STRICT_RADIUS && !isInside) {
+        Swal.fire(
+          "Di Luar Jangkauan!",
+          `Jarak Anda saat ini ${currentDistance} meter dari titik lokasi (maksimal ${MAX_RADIUS_METER} meter). Absensi ditolak.`,
+          "error"
+        );
+        return;
+      }
+
+      // Simpan profil ke HP agar besok tidak perlu mengetik ulang
+      localStorage.setItem("absen_nik", nik);
+      localStorage.setItem("absen_nama", nama);
+      localStorage.setItem("absen_cabang", cabang);
+
+      Swal.fire({
+        title: `Memproses Absen ${tipe}...`,
+        text: "Menyimpan titik koordinat & waktu ke server",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      const payload = {
+        action: "absen",
+        nik: nik,
+        nama: nama,
+        cabang: cabang || "-",
+        tipe: tipe,
+        lat: currentLat.toFixed(6),
+        lng: currentLng.toFixed(6),
+        jarak: currentDistance,
+        statusRadius: isInside ? "Dalam Radius" : "Luar Radius"
+      };
+
+      try {
+        const response = await fetch(WEB_APP_URL, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+
+        if (result.status === "success") {
+          const todayKey = new Date().toISOString().split("T")[0];
+          const logToday = JSON.parse(localStorage.getItem("absen_log_" + todayKey) || "{}");
+          if (tipe === "MASUK") {
+            logToday.masuk = result.jam;
+            document.getElementById("lastMasukBadge").textContent = "Masuk: " + result.jam;
+          } else {
+            logToday.keluar = result.jam;
+            document.getElementById("lastKeluarBadge").textContent = "Keluar: " + result.jam;
+          }
+          localStorage.setItem("absen_log_" + todayKey, JSON.stringify(logToday));
+
+          Swal.fire("Berhasil!", result.message, "success");
+        } else if (result.status === "warning") {
+          Swal.fire("Info Absensi", result.message, "info");
+        } else {
+          Swal.fire("Gagal", result.message || "Terjadi kesalahan saat menyimpan data.", "error");
+        }
+      } catch (err) {
+        Swal.fire("Koneksi Gagal", "Pastikan koneksi internet aktif dan deployment Apps Script sudah diset ke 'Anyone'.", "error");
+      }
+    }
+
+    // 6. Login & Dashboard Report Admin
+    async function openAdminModal() {
+      const { value: password } = await Swal.fire({
+        title: "Akses Report Admin",
+        input: "password",
+        inputLabel: "Masukkan Password Admin",
+        inputPlaceholder: "••••••••",
+        showCancelButton: true,
+        confirmButtonText: "Buka Laporan",
+        cancelButtonText: "Batal",
+        confirmButtonColor: "#4f46e5"
+      });
+
+      if (!password) return;
+
+      Swal.fire({
+        title: "Memverifikasi...",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      try {
+        const res = await fetch(WEB_APP_URL, {
+          method: "POST",
+          body: JSON.stringify({ action: "getReport", password: password })
+        });
+        const data = await res.json();
+
+        if (data.status === "success") {
+          Swal.close();
+          allReportData = data.records || [];
+          document.getElementById("employeeView").classList.add("hidden");
+          document.getElementById("btnAdminNav").classList.add("hidden");
+          document.getElementById("adminView").classList.remove("hidden");
+          renderReportTable();
+        } else {
+          Swal.fire("Akses Ditolak", data.message || "Password salah!", "error");
+        }
+      } catch (err) {
+        Swal.fire("Error", "Gagal mengambil data laporan dari server.", "error");
+      }
+    }
+
+    function logoutAdmin() {
+      document.getElementById("adminView").classList.add("hidden");
+      document.getElementById("employeeView").classList.remove("hidden");
+      document.getElementById("btnAdminNav").classList.remove("hidden");
+      allReportData = [];
+    }
+
+    function resetFilters() {
+      document.getElementById("filterDate").value = "";
+      document.getElementById("filterSearch").value = "";
+      renderReportTable();
+    }
+
+    function renderReportTable() {
+      const fDate = document.getElementById("filterDate").value;
+      const fSearch = document.getElementById("filterSearch").value.toLowerCase().trim();
+
+      filteredReportData = allReportData.filter((row) => {
+        const matchDate = !fDate || row.tanggal === fDate;
+        const matchText =
+          !fSearch ||
+          row.nama.toLowerCase().includes(fSearch) ||
+          row.nik.toLowerCase().includes(fSearch) ||
+          row.cabang.toLowerCase().includes(fSearch);
+        return matchDate && matchText;
+      });
+
+      // Update Statistik
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+      document.getElementById("statTotal").textContent = filteredReportData.length;
+      document.getElementById("statToday").textContent = allReportData.filter((r) => r.tanggal === todayStr).length;
+      document.getElementById("statInRadius").textContent = filteredReportData.filter((r) => r.statusMasuk === "Dalam Radius").length;
+      document.getElementById("statOutRadius").textContent = filteredReportData.filter((r) => r.statusMasuk === "Luar Radius").length;
+
+      const tbody = document.getElementById("reportTableBody");
+      if (filteredReportData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center text-slate-400">Tidak ada data absensi ditemukan.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filteredReportData.map((r) => {
+        const badgeMasuk = r.statusMasuk === "Dalam Radius"
+          ? `<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">${r.jarakMasuk}m</span>`
+          : (r.jarakMasuk !== "-" ? `<span class="px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold">${r.jarakMasuk}m</span>` : "-");
+
+        const badgeKeluar = r.statusKeluar === "Dalam Radius"
+          ? `<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">${r.jarakKeluar}m</span>`
+          : (r.jarakKeluar !== "-" ? `<span class="px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold">${r.jarakKeluar}m</span>` : "-");
+
+        const linkMasuk = r.koordinatMasuk && r.koordinatMasuk !== "-"
+          ? `<a href="https://www.google.com/maps?q=${encodeURIComponent(r.koordinatMasuk)}" target="_blank" class="text-indigo-600 hover:underline ml-1" title="Lihat Maps"><i class="fa-solid fa-map-location-dot"></i></a>`
+          : "";
+
+        const linkKeluar = r.koordinatKeluar && r.koordinatKeluar !== "-"
+          ? `<a href="https://www.google.com/maps?q=${encodeURIComponent(r.koordinatKeluar)}" target="_blank" class="text-indigo-600 hover:underline ml-1" title="Lihat Maps"><i class="fa-solid fa-map-location-dot"></i></a>`
+          : "";
+
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="p-3 font-medium whitespace-nowrap">${r.tanggal}</td>
+            <td class="p-3 font-mono font-semibold text-slate-700">${r.nik}</td>
+            <td class="p-3 font-bold text-slate-800">${r.nama}</td>
+            <td class="p-3 text-slate-600">${r.cabang}</td>
+            <td class="p-3 font-mono font-semibold text-emerald-700">${r.jamMasuk}</td>
+            <td class="p-3 whitespace-nowrap">${badgeMasuk} ${linkMasuk}</td>
+            <td class="p-3 font-mono font-semibold text-rose-700">${r.jamKeluar}</td>
+            <td class="p-3 whitespace-nowrap">${badgeKeluar} ${linkKeluar}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function exportToCSV() {
+      if (filteredReportData.length === 0) {
+        Swal.fire("Kosong", "Tidak ada data untuk diunduh.", "info");
+        return;
+      }
+      const headers = ["Tanggal", "NIK", "Nama", "Cabang", "Jam Masuk", "Koordinat Masuk", "Jarak Masuk (m)", "Status Masuk", "Jam Keluar", "Koordinat Keluar", "Jarak Keluar (m)", "Status Keluar"];
+      const rows = filteredReportData.map(r => [
+        r.tanggal, r.nik, `"${r.nama}"`, `"${r.cabang}"`, r.jamMasuk, `"${r.koordinatMasuk}"`, r.jarakMasuk, r.statusMasuk, r.jamKeluar, `"${r.koordinatKeluar}"`, r.jarakKeluar, r.statusKeluar
+      ]);
+      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Rekap_Absensi_${new Date().toISOString().split("T")[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+</html>
